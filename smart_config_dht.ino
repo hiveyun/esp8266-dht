@@ -36,7 +36,7 @@ void setup() {
   while (!Serial) {};
 
   pinMode(DHT_VCC, OUTPUT);
-  digitalWrite(DHT_VCC, LOW);
+  digitalWrite(DHT_VCC, HIGH);
   pinMode(SMART_CONFIG_LED, OUTPUT);
   digitalWrite(SMART_CONFIG_LED, HIGH);
   pinMode(SMART_CONFIG_BUTTON, INPUT_PULLUP);

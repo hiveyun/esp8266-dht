@@ -31,9 +31,9 @@ PubSubClient client(wifiClient);
 unsigned long lastSend;
 
 void setup() {
-  Serial.begin(115200);
+  // Serial.begin(115200);
   // Set output mode for all GPIO pins
-  while (!Serial) {};
+  // while (!Serial) {};
 
   pinMode(DHT_VCC, OUTPUT);
   digitalWrite(DHT_VCC, HIGH);
@@ -63,7 +63,7 @@ void smart_config() {
     smart_blink();
     WiFi.beginSmartConfig();
     while(1){
-      delay(500);
+      delay(200);
       smart_blink();
       if (WiFi.smartConfigDone()) {
         break;
@@ -97,7 +97,7 @@ void loop() {
 }
 
 void getAndSendTemperatureAndHumidityData() {
-  Serial.println("Collecting temperature data.");
+  // Serial.println("Collecting temperature data.");
 
   // Reading temperature or humidity takes about 250 milliseconds!
   float h = dht.readHumidity();
@@ -106,26 +106,26 @@ void getAndSendTemperatureAndHumidityData() {
 
   // Check if any reads failed and exit early (to try again).
   if (isnan(h) || isnan(t)) {
-    Serial.println("Failed to read from DHT sensor!");
+    // Serial.println("Failed to read from DHT sensor!");
     return;
   }
 
-  Serial.print("Humidity: ");
-  Serial.print(h);
-  Serial.print(" %\t");
-  Serial.print("Temperature: ");
-  Serial.print(t);
-  Serial.print(" *C ");
+  // Serial.print("Humidity: ");
+  // Serial.print(h);
+  // Serial.print(" %\t");
+  // Serial.print("Temperature: ");
+  // Serial.print(t);
+  // Serial.print(" *C ");
 
   String temperature = String(t);
   String humidity = String(h);
 
 
   // Just debug messages
-  Serial.print( "Sending temperature and humidity : [" );
-  Serial.print( temperature ); Serial.print( "," );
-  Serial.print( humidity );
-  Serial.print( "]   -> " );
+  // Serial.print( "Sending temperature and humidity : [" );
+  // Serial.print( temperature ); Serial.print( "," );
+  // Serial.print( humidity );
+  // Serial.print( "]   -> " );
 
   // Prepare a JSON payload string
   String payload = "{";
@@ -137,11 +137,11 @@ void getAndSendTemperatureAndHumidityData() {
   char attributes[100];
   payload.toCharArray( attributes, 100 );
   client.publish( "v1/devices/me/telemetry", attributes );
-  Serial.println( attributes );
+  // Serial.println( attributes );
 }
 
 void InitWiFi() {
-  Serial.println("Connecting to AP ...");
+  // Serial.println("Connecting to AP ...");
   // attempt to connect to WiFi network
 
   // set for STA mode
@@ -150,11 +150,11 @@ void InitWiFi() {
   // WiFi.begin(WIFI_AP, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-    Serial.print(".");
+    // Serial.print(".");
     smart_blink();
     smart_config();
   }
-  Serial.println("Connected to AP");
+  // Serial.println("Connected to AP");
 }
 
 void reconnect() {
@@ -165,19 +165,19 @@ void reconnect() {
       while (WiFi.status() != WL_CONNECTED) {
         delay(1000);
         smart_blink();
-        Serial.print(".");
+        // Serial.print(".");
         smart_config();
       }
-      Serial.println("Connected to AP");
+      // Serial.println("Connected to AP");
     }
-    Serial.print("Connecting to Thingsboard node ...");
+    // Serial.print("Connecting to Thingsboard node ...");
     // Attempt to connect (clientId, username, password)
     if ( client.connect("ESP8266 Device", TOKEN, NULL) ) {
-      Serial.println( "[DONE]" );
+      // Serial.println( "[DONE]" );
     } else {
-      Serial.print( "[FAILED] [ rc = " );
-      Serial.print( client.state() );
-      Serial.println( " : retrying in 5 seconds]" );
+      // Serial.print( "[FAILED] [ rc = " );
+      // Serial.print( client.state() );
+      // Serial.println( " : retrying in 5 seconds]" );
       // Wait 5 seconds before retrying
       delay( 5000 );
     }

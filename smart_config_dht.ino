@@ -29,6 +29,7 @@ WiFiClient wifiClient;
 PubSubClient client(wifiClient);
 
 unsigned long lastSend;
+unsigned long periodic = 15000;
 
 void setup() {
   // Serial.begin(115200);
@@ -36,14 +37,77 @@ void setup() {
   // while (!Serial) {};
 
   pinMode(DHT_VCC, OUTPUT);
-  digitalWrite(DHT_VCC, HIGH);
+  digitalWrite(DHT_VCC, LOW);
   pinMode(SMART_CONFIG_LED, OUTPUT);
   digitalWrite(SMART_CONFIG_LED, HIGH);
   pinMode(SMART_CONFIG_BUTTON, INPUT_PULLUP);
   delay(10);
   InitWiFi();
   client.setServer( thingsboardServer, 1883 );
+  client.setCallback(on_message);
   lastSend = 0;
+}
+
+// The callback for when a PUBLISH message is received from the server.
+void on_message(const char* topic, byte* payload, unsigned int length) {
+
+  // Serial.println("On message");
+
+  char json[length + 1];
+  strncpy (json, (char*)payload, length);
+  json[length] = '\0';
+
+  // Serial.print("Topic: ");
+  // Serial.println(topic);
+  // Serial.print("Message: ");
+  // Serial.println(json);
+
+  // Decode JSON request
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& data = jsonBuffer.parseObject((char*)json);
+
+  if (!data.success())
+  {
+    // Serial.println("parseObject() failed");
+    return;
+  }
+
+  // Check request method
+  String methodName = String((const char*)data["method"]);
+
+  if (methodName.equals("getPeriodic")) {
+    // Reply with GPIO status
+    String responseTopic = String(topic);
+    responseTopic.replace("request", "response");
+    client.publish(responseTopic.c_str(), get_periodic().c_str());
+  } else if (methodName.equals("setPeriodic")) {
+    // Update GPIO status and reply
+    set_periodic(data["params"]["periodic"]);
+    String responseTopic = String(topic);
+    responseTopic.replace("request", "response");
+    client.publish(responseTopic.c_str(), get_periodic().c_str());
+    client.publish("v1/devices/me/attributes", get_periodic().c_str());
+  }
+}
+
+String get_periodic() {
+  // Prepare gpios JSON payload string
+  StaticJsonBuffer<200> jsonBuffer;
+  JsonObject& data = jsonBuffer.createObject();
+  data["periodic"] = periodic;
+  char payload[256];
+  data.printTo(payload, sizeof(payload));
+  String strPayload = String(payload);
+  // Serial.print("Get gpio status: ");
+  // Serial.println(strPayload);
+  return strPayload;
+}
+
+void set_periodic(unsigned long periodic_) {
+    if (periodic_ < 2000) {
+        periodic_ = 2000;
+    }
+    periodic = periodic_;
 }
 
 void smart_config() {
@@ -88,10 +152,16 @@ void loop() {
     reconnect();
   }
 
-  if ( millis() - lastSend > 1000 ) { // Update and send only after 1 seconds
+  if ( millis() - lastSend > periodic - 1000 ) { // Update and send only after 1 seconds
+    digitalWrite(DHT_VCC, HIGH);
+    pinMode(DHT_PIN, INPUT_PULLUP);
+    delay(1000);
     getAndSendTemperatureAndHumidityData();
+    digitalWrite(DHT_VCC, LOW);
     lastSend = millis();
   }
+
+  smart_config();
 
   client.loop();
 }
@@ -174,6 +244,8 @@ void reconnect() {
     // Attempt to connect (clientId, username, password)
     if ( client.connect("ESP8266 Device", TOKEN, NULL) ) {
       // Serial.println( "[DONE]" );
+      client.subscribe("v1/devices/me/rpc/request/+");
+      client.publish("v1/devices/me/attributes", get_periodic().c_str());
     } else {
       // Serial.print( "[FAILED] [ rc = " );
       // Serial.print( client.state() );

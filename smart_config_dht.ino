@@ -2,6 +2,7 @@
 #include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
+#include <EEPROM.h>
 
 #include "DHT.h"
 
@@ -31,17 +32,30 @@ PubSubClient client(wifiClient);
 unsigned long lastSend;
 unsigned long periodic = 15000;
 
+char wifi_ap[32];
+char wifi_password[64];
+
 void setup() {
   // Serial.begin(115200);
   // Set output mode for all GPIO pins
   // while (!Serial) {};
 
+  EEPROM.begin(512);
   pinMode(DHT_VCC, OUTPUT);
   digitalWrite(DHT_VCC, LOW);
   pinMode(SMART_CONFIG_LED, OUTPUT);
   digitalWrite(SMART_CONFIG_LED, HIGH);
   pinMode(SMART_CONFIG_BUTTON, INPUT_PULLUP);
   delay(10);
+
+  for (int i = 0; i < 32; ++i) {
+    wifi_ap[i] = char(EEPROM.read(i));
+  }
+
+  for (int i = 32; i < 96; ++i) {
+    wifi_password[i - 32] = char(EEPROM.read(i));
+  }
+
   InitWiFi();
   client.setServer( thingsboardServer, 1883 );
   client.setCallback(on_message);
@@ -134,7 +148,20 @@ void smart_config() {
       }
     }
   }
+
   digitalWrite(SMART_CONFIG_LED, HIGH);
+
+  strcpy(wifi_ap, WiFi.SSID().c_str());
+  strcpy(wifi_password, WiFi.psk().c_str());
+
+  for (int i = 0; i < 32; ++i) {
+    EEPROM.write(i, wifi_ap[i]);
+  }
+
+  for (int i = 32; i < 96; ++i) {
+    EEPROM.write(i, wifi_password[i - 32]);
+  }
+  EEPROM.commit();
 }
 
 void smart_blink() {
@@ -217,7 +244,7 @@ void InitWiFi() {
   // set for STA mode
   WiFi.mode(WIFI_STA);
 
-  // WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+  WiFi.begin(wifi_ap, wifi_password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     // Serial.print(".");
@@ -231,7 +258,7 @@ void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
     if ( WiFi.status() != WL_CONNECTED) {
-      // WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+      WiFi.begin(wifi_ap, wifi_password);
       while (WiFi.status() != WL_CONNECTED) {
         delay(1000);
         smart_blink();

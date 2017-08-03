@@ -217,6 +217,8 @@ void getAndSendTemperatureAndHumidityData() {
   String temperature = String(t);
   String humidity = String(h);
 
+  auto vcc = ESP.getVcc();
+
 
   // Just debug messages
   // Serial.print( "Sending temperature and humidity : [" );
@@ -227,7 +229,8 @@ void getAndSendTemperatureAndHumidityData() {
   // Prepare a JSON payload string
   String payload = "{";
   payload += "\"temperature\":"; payload += temperature; payload += ",";
-  payload += "\"humidity\":"; payload += humidity;
+  payload += "\"humidity\":"; payload += humidity; payload += ",";
+  payload += "\"vcc\":"; payload += String(vcc);
   payload += "}";
 
   // Send payload

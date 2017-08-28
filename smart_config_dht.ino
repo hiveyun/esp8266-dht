@@ -184,6 +184,9 @@ void closeBlink() {
 void threadDelay(unsigned long timeout) {
   unsigned long lastCheck = millis();
   while (millis() - lastCheck < timeout) {
+    if (client.connected()) {
+      client.loop();
+    }
     smartConfig();
     server.handleClient();
   }
@@ -194,7 +197,7 @@ void loop() {
     reconnect();
   }
 
-  if ( millis() - lastSend > periodic - 1000 ) { // Update and send only after 1 seconds
+  if (millis() - lastSend > periodic - 1000) { // Update and send only after 1 seconds
     digitalWrite(DHT_VCC, HIGH);
     pinMode(DHT_PIN, INPUT_PULLUP);
     threadDelay(1000);
@@ -204,7 +207,6 @@ void loop() {
   }
 
   client.loop();
-
   smartConfig();
   server.handleClient();
 }

@@ -121,8 +121,7 @@ String getLocalIP() {
   data["ip"] = WiFi.localIP().toString();
   char payload[100];
   data.printTo(payload, sizeof(payload));
-  return = String(payload);
-  return strPayload;
+  return String(payload);
 }
 
 void smartConfig() {
@@ -182,6 +181,14 @@ void closeBlink() {
   blinkStatus = false;
 }
 
+void threadDelay(unsigned long timeout) {
+  unsigned long lastCheck = millis();
+  while (millis() - lastCheck < timeout) {
+    smartConfig();
+    server.handleClient();
+  }
+}
+
 void loop() {
   if (!client.connected()) {
     reconnect();
@@ -190,7 +197,7 @@ void loop() {
   if ( millis() - lastSend > periodic - 1000 ) { // Update and send only after 1 seconds
     digitalWrite(DHT_VCC, HIGH);
     pinMode(DHT_PIN, INPUT_PULLUP);
-    delay(1000);
+    threadDelay(1000);
     getAndSendTemperatureAndHumidityData();
     digitalWrite(DHT_VCC, LOW);
     lastSend = millis();
@@ -260,11 +267,7 @@ void reconnect() {
     } else {
       // Wait 5 seconds before retrying
 
-      unsigned long lastCheck = millis();
-      while (millis() - lastCheck < 5000) {
-        smartConfig();
-        server.handleClient();
-      }
+      threadDelay(5000);
       smartBlink();
     }
   }

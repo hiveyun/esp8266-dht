@@ -102,12 +102,9 @@ String getPeriodic() {
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& data = jsonBuffer.createObject();
   data["periodic"] = periodic;
-  char payload[256];
+  char payload[100];
   data.printTo(payload, sizeof(payload));
-  String strPayload = String(payload);
-  // Serial.print("Get gpio status: ");
-  // Serial.println(strPayload);
-  return strPayload;
+  return String(payload);
 }
 
 void setPeriodic(unsigned long periodic_) {
@@ -122,9 +119,9 @@ String getLocalIP() {
   StaticJsonBuffer<200> jsonBuffer;
   JsonObject& data = jsonBuffer.createObject();
   data["ip"] = WiFi.localIP().toString();
-  char payload[256];
+  char payload[100];
   data.printTo(payload, sizeof(payload));
-  String strPayload = String(payload);
+  return = String(payload);
   return strPayload;
 }
 

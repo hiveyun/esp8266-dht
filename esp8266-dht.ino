@@ -295,6 +295,6 @@ void handleSetToken() {
   server.send(200, "text/plain", "OK");
 }
 
-void handleNotFound(){
+void handleNotFound() {
   server.send(404, "text/plain", "Not Found");
 }

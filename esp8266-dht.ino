@@ -19,7 +19,7 @@ DHT dht(DHT_PIN, DHT_TYPE);
 
 bool blinkStatus = false;
 
-char hiveyunServer[] = "platform.hiveyun.com";
+char hiveyunServer[] = "gw.huabot.com";
 
 WiFiClient wifiClient;
 
@@ -56,7 +56,7 @@ void setup() {
   }
 
   InitWiFi();
-  client.setServer( hiveyunServer, 1883 );
+  client.setServer( hiveyunServer, 11883 );
   client.setCallback(onMessage);
 
   server.on("/update_token", HTTP_POST, handleSetToken);
@@ -89,11 +89,11 @@ void onMessage(const char* topic, byte* payload, unsigned int length) {
     client.publish(responseTopic.c_str(), getPeriodic().c_str());
   } else if (methodName.equals("setPeriodic")) {
     // Update GPIO status and reply
-    setPeriodic(data["params"]["periodic"]);
+    setPeriodic(data["data"]);
     String responseTopic = String(topic);
     responseTopic.replace("request", "response");
     client.publish(responseTopic.c_str(), getPeriodic().c_str());
-    client.publish("v1/devices/me/attributes", getPeriodic().c_str());
+    client.publish("/attributes", getPeriodic().c_str());
   }
 }
 
@@ -234,7 +234,7 @@ void getAndSendTemperatureAndHumidityData() {
   // Send payload
   char attributes[100];
   payload.toCharArray(attributes, 100);
-  client.publish("v1/devices/me/telemetry", attributes);
+  client.publish("/telemetry", attributes);
 }
 
 void InitWiFi() {
@@ -262,10 +262,10 @@ void reconnect() {
       configWiFiWithSmartConfig();
     }
     // Attempt to connect (clientId, username, password)
-    if (client.connect("ESP8266 Relay", token, NULL)) {
-      client.subscribe("v1/devices/me/rpc/request/+");
-      client.publish("v1/devices/me/attributes", getPeriodic().c_str());
-      client.publish("v1/devices/me/attributes", getLocalIP().c_str());
+    if (client.connect("ESP8266 Relay", "a937e135a6881193af39", "0d65b112c7b14f59b5ed69122958bb08")) {
+      client.subscribe("/request/+");
+      client.publish("/attributes", getPeriodic().c_str());
+      client.publish("/attributes", getLocalIP().c_str());
     } else {
       // Wait 5 seconds before retrying
 

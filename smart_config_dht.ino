@@ -1,14 +1,21 @@
+// https://github.com/bblanchon/ArduinoJson.git
 #include <ArduinoJson.h>
+// https://github.com/knolleary/pubsubclient.git
 #include <PubSubClient.h>
+
 #include <ESP8266WiFi.h>
-#include <WiFiUdp.h>
-#include <EEPROM.h>
 #include <WiFiClient.h>
-#include <ESP8266WebServer.h>
+
+#include <EEPROM.h>
+#include <WiFiUDP.h>
+
+#include "dht_fsm_ext.h"
+#include "multism.h"
+
 #include "DHT.h"
 
-#define SMART_CONFIG_BUTTON 14
-#define SMART_CONFIG_LED 2
+#define BUTTON 14
+#define LED 2
 
 #define DHT_VCC 5
 #define DHT_PIN 12
@@ -17,284 +24,309 @@
 // Initialize DHT sensor.
 DHT dht(DHT_PIN, DHT_TYPE);
 
-bool blinkStatus = false;
-
-char hiveyunServer[] = "gw.huabot.com";
+#define MQTT_USERNAME "a937e135a6881193af39"
+#define MQTT_HOST "gw.huabot.com"
+#define MQTT_PORT 11883
 
 WiFiClient wifiClient;
-
 PubSubClient client(wifiClient);
 
-ESP8266WebServer server(80);
-
-unsigned long lastSend;
-unsigned long periodic = 15000;
+WiFiUDP udpServer;
 
 char wifiAP[32];
 char wifiPassword[64];
-char token[30];
+
+char mqtt_password[40];
+
+unsigned long ledTimer = millis();
+unsigned long ledDelay = 1000;
+
+unsigned long buttonPressTimer = millis();
+unsigned long smartconfigTimer = millis();
+unsigned long sensorTimer = millis();
+unsigned long mqttRetryTimer = millis();
+
+float temperature = 0;
+float humidity = 0;
+
+bool maybeNeedBind = false;
 
 void setup() {
-  EEPROM.begin(512);
-  pinMode(DHT_VCC, OUTPUT);
-  digitalWrite(DHT_VCC, LOW);
-  pinMode(SMART_CONFIG_LED, OUTPUT);
-  digitalWrite(SMART_CONFIG_LED, HIGH);
-  pinMode(SMART_CONFIG_BUTTON, INPUT_PULLUP);
-  delay(10);
-
-  for (int i = 0; i < 32; ++i) {
-    wifiAP[i] = char(EEPROM.read(i));
-  }
-
-  for (int i = 32; i < 96; ++i) {
-    wifiPassword[i - 32] = char(EEPROM.read(i));
-  }
-
-  for (int i = 96; i < 126; ++i) {
-    token[i - 96] = char(EEPROM.read(i));
-  }
-
-  InitWiFi();
-  client.setServer( hiveyunServer, 11883 );
-  client.setCallback(onMessage);
-
-  server.on("/update_token", HTTP_POST, handleSetToken);
-  server.onNotFound(handleNotFound);
-  server.begin();
-}
-
-// The callback for when a PUBLISH message is received from the server.
-void onMessage(const char* topic, byte* payload, unsigned int length) {
-
-  char json[length + 1];
-  strncpy(json, (char*)payload, length);
-  json[length] = '\0';
-
-  // Decode JSON request
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& data = jsonBuffer.parseObject((char*)json);
-
-  if (!data.success()) {
-    return;
-  }
-
-  // Check request method
-  String methodName = String((const char*)data["method"]);
-
-  if (methodName.equals("getPeriodic")) {
-    // Reply with GPIO status
-    String responseTopic = String(topic);
-    responseTopic.replace("request", "response");
-    client.publish(responseTopic.c_str(), getPeriodic().c_str());
-  } else if (methodName.equals("setPeriodic")) {
-    // Update GPIO status and reply
-    setPeriodic(data["data"]);
-    String responseTopic = String(topic);
-    responseTopic.replace("request", "response");
-    client.publish(responseTopic.c_str(), getPeriodic().c_str());
-    client.publish("/attributes", getPeriodic().c_str());
-  }
-}
-
-String getPeriodic() {
-  // Prepare gpios JSON payload string
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& data = jsonBuffer.createObject();
-  data["periodic"] = periodic;
-  char payload[100];
-  data.printTo(payload, sizeof(payload));
-  return String(payload);
-}
-
-void setPeriodic(unsigned long periodic_) {
-    if (periodic_ < 2000) {
-        periodic_ = 2000;
-    }
-    periodic = periodic_;
-}
-
-String getLocalIP() {
-  // Prepare relays JSON payload string
-  StaticJsonBuffer<200> jsonBuffer;
-  JsonObject& data = jsonBuffer.createObject();
-  data["ip"] = WiFi.localIP().toString();
-  char payload[100];
-  data.printTo(payload, sizeof(payload));
-  return String(payload);
-}
-
-void smartConfig() {
-  if (digitalRead(SMART_CONFIG_BUTTON)) {
-    return;
-  }
-
-  delay(2000);
-  if (digitalRead(SMART_CONFIG_BUTTON)) {
-    return;
-  }
-  WiFi.disconnect();
-
-  while(WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    smartBlink();
-    WiFi.beginSmartConfig();
-    while(1){
-      delay(200);
-      smartBlink();
-      if (WiFi.smartConfigDone()) {
-        break;
-      }
-    }
-  }
-
-  closeBlink();
-
-  strcpy(wifiAP, WiFi.SSID().c_str());
-  strcpy(wifiPassword, WiFi.psk().c_str());
-
-  for (int i = 0; i < 32; ++i) {
-    EEPROM.write(i, wifiAP[i]);
-  }
-
-  for (int i = 32; i < 96; ++i) {
-    EEPROM.write(i, wifiPassword[i - 32]);
-  }
-  EEPROM.commit();
-}
-
-void smartBlink() {
-  if (blinkStatus) {
-    closeBlink();
-  } else {
-    openBlink();
-  }
-}
-
-void openBlink() {
-  digitalWrite(SMART_CONFIG_LED, LOW);
-  blinkStatus = true;
-}
-
-void closeBlink() {
-  digitalWrite(SMART_CONFIG_LED, HIGH);
-  blinkStatus = false;
-}
-
-void threadDelay(unsigned long timeout) {
-  unsigned long lastCheck = millis();
-  while (millis() - lastCheck < timeout) {
-    if (client.connected()) {
-      client.loop();
-    }
-    smartConfig();
-    server.handleClient();
-  }
+    EEPROM.begin(512);
+    pinMode(BUTTON, INPUT_PULLUP);
+    pinMode(LED, OUTPUT);
+    pinMode(DHT_VCC, OUTPUT);
+    digitalWrite(DHT_VCC, LOW);
+    initEventQueue();
+    delay(10);
 }
 
 void loop() {
-  if (!client.connected()) {
-    reconnect();
+  dht_check(NULL);
+  flushEventQueue();
+  client.loop();
+  if (ledTimer + ledDelay < millis()) {
+    ledTimer = millis();
+    led_toggle(NULL);
   }
+}
 
-  if (millis() - lastSend > periodic - 1000) { // Update and send only after 1 seconds
+void initWiFi(void) {
+    WiFi.mode(WIFI_STA);
+
+    for (int i = 0; i < 32; ++i) {
+      wifiAP[i] = char(EEPROM.read(i));
+    }
+
+    for (int i = 32; i < 96; ++i) {
+      wifiPassword[i - 32] = char(EEPROM.read(i));
+    }
+
+    WiFi.begin(wifiAP, wifiPassword);
+}
+
+void initMqtt(void) {
+    client.setServer(MQTT_HOST, MQTT_PORT);
+    client.setCallback(onMqttMessage);
+    for (int i = 96; i < 136; ++i) {
+        mqtt_password[i - 96] = char(EEPROM.read(i));
+    }
+}
+
+void buttonCheck(const button_check_t *a1) {
+    if (digitalRead(BUTTON)) {
+        button_released(NULL);
+    } else {
+        button_pressed(NULL);
+    }
+}
+
+void buttonEnterPressed(void) {
+    buttonPressTimer = millis();
+}
+
+void buttonPressed(const button_pressed_t *) {
+    if (buttonPressTimer + 2000 < millis()) {
+        button_longpressed(NULL);
+    }
+}
+
+void connectCheck(const mqtt_check_t *a1) {
+    if(client.connected()) {
+        mqtt_connected(NULL);
+    } else {
+        mqtt_unconnected(NULL);
+    }
+}
+
+void led1000(void) {
+    ledDelay = 1000;
+}
+
+void led200(void) {
+    ledDelay = 200;
+}
+
+void led500(void) {
+    ledDelay = 500;
+}
+
+void ledOff(void) {
+    digitalWrite(LED, HIGH);
+}
+
+void ledOn(void) {
+    digitalWrite(LED, LOW);
+}
+
+void netCheck(const net_check_t *a1) {
+    if (WiFi.status() == WL_CONNECTED) {
+        net_online(NULL);
+    } else {
+        net_offline(NULL);
+    }
+}
+
+void onConnected(void) {
+    client.subscribe("/request/+");
+}
+
+void beginSmartconfig(void) {
+    if (WiFi.status() == WL_CONNECTED) {
+        WiFi.disconnect();
+    }
+    while(WiFi.status() == WL_CONNECTED) {
+        delay(100);
+    }
+    WiFi.beginSmartConfig();
+    maybeNeedBind = true;
+    smartconfigTimer = millis();
+}
+
+void smartconfigDone(const smartconfig_check_t *) {
+    if (WiFi.smartConfigDone()) {
+        smartconfig_done(NULL);
+        strcpy(wifiAP, WiFi.SSID().c_str());
+        strcpy(wifiPassword, WiFi.psk().c_str());
+
+        for (int i = 0; i < 32; ++i) {
+          EEPROM.write(i, wifiAP[i]);
+        }
+
+        for (int i = 32; i < 96; ++i) {
+          EEPROM.write(i, wifiPassword[i - 32]);
+        }
+        EEPROM.commit();
+    } else {
+        if (millis() - smartconfigTimer > 120000) {
+            smartconfig_timeout(NULL);
+        }
+    }
+}
+
+void fetchToken(const mqtt_check_t *) {
+    char message = udpServer.parsePacket();
+    int packetsize = udpServer.available();
+    if (message) {
+        char data[200];
+        udpServer.read(data,packetsize);
+
+        data[packetsize] = '\0';
+        DynamicJsonDocument doc(200);
+        deserializeJson(doc, data);
+        String type = String((const char*)doc["type"]);
+        DynamicJsonDocument rsp(200);
+
+        if (type.equals("Ping")) {
+            rsp["type"] = "Pong";
+        } else if (type.equals("MqttPass")) {
+            strcpy(mqtt_password, doc["value"]);
+            rsp["type"] = "Success";
+            for (int i = 96; i < 136; ++i) {
+              EEPROM.write(i, mqtt_password[i - 96]);
+            }
+            EEPROM.commit();
+            client.disconnect();
+            mqtt_done(NULL);
+        } else {
+            rsp["type"] = "Error";
+            rsp["value"] = "Unknow type";
+        }
+
+        IPAddress remoteip=udpServer.remoteIP();
+        uint16_t remoteport=udpServer.remotePort();
+        udpServer.beginPacket(remoteip,remoteport);
+
+        serializeJson(rsp, data);
+
+        udpServer.write(data);
+
+        udpServer.endPacket();
+    }
+}
+
+void checkPassword(const mqtt_check_t *) {
+    if (mqtt_password[0] == '\0') {
+        mqtt_invalid(NULL);
+    } else {
+        mqtt_valid(NULL);
+    }
+}
+
+void startUdpServer(void) {
+    udpServer.begin(1234);
+}
+
+void stopUdpServer(void) {
+    udpServer.stop();
+}
+
+void tryConnect(const mqtt_unconnected_t *) {
+    if (mqttRetryTimer + 5000 > millis()) {
+         return;
+     }
+
+     mqttRetryTimer = millis();
+    if (client.connect("ESP8266 Relay", MQTT_USERNAME, mqtt_password)) {
+        maybeNeedBind = false;
+    } else {
+        if (maybeNeedBind) {
+            mqtt_failed(NULL);
+        }
+    }
+}
+
+void enterSensorIdle(void) {
+    sensorTimer = millis();
+}
+
+void sensorIdleCheck(const sensor_check_t *) {
+    if (sensorTimer + 10000 < millis()) {
+        sensor_report(NULL);
+    }
+}
+
+void enterSensorReport(void) {
+    sensorTimer = millis();
     digitalWrite(DHT_VCC, HIGH);
     pinMode(DHT_PIN, INPUT_PULLUP);
-    threadDelay(1000);
-    getAndSendTemperatureAndHumidityData();
+}
+
+void sensorReportCheck(const sensor_check_t *) {
+    if (sensorTimer + 1000 < millis()) {
+        sensor_report(NULL);
+    }
+}
+
+void sensorReport(const sensor_report_t *) {
+    // Reading temperature or humidity takes about 250 milliseconds!
+    float h = dht.readHumidity();
+    // Read temperature as Celsius (the default)
+    float t = dht.readTemperature();
+
+    // Check if any reads failed and exit early (to try again).
+    if (isnan(h) || isnan(t)) {
+      return;
+    }
+
+    temperature = t;
+    humidity = h;
+
+    DynamicJsonDocument data(100);
+    data["temperature"] = temperature;
+    data["humidity"] = humidity;
+    char payload[100];
+    serializeJson(data, payload);
+    client.publish("/telemetry", payload);
+}
+
+void exitSensorReport(void) {
     digitalWrite(DHT_VCC, LOW);
-    lastSend = millis();
-  }
-
-  client.loop();
-  smartConfig();
-  server.handleClient();
 }
 
-void getAndSendTemperatureAndHumidityData() {
-  // Reading temperature or humidity takes about 250 milliseconds!
-  float h = dht.readHumidity();
-  // Read temperature as Celsius (the default)
-  float t = dht.readTemperature();
+// The callback for when a PUBLISH message is received from the server.
+void onMqttMessage(const char* topic, byte* payload, unsigned int length) {
+    char json[length + 1];
+    strncpy(json, (char*)payload, length);
+    json[length] = '\0';
 
-  // Check if any reads failed and exit early (to try again).
-  if (isnan(h) || isnan(t)) {
-    return;
-  }
+    // Decode JSON request
+    DynamicJsonDocument data(1024);
+    deserializeJson(data, json);
 
-  String temperature = String(t);
-  String humidity = String(h);
+    // Check request method
+    String methodName = String((const char*)data["method"]);
+    String responseTopic = String(topic);
+    responseTopic.replace("request", "response");
 
-  // Prepare a JSON payload string
-  String payload = "{";
-  payload += "\"temperature\":"; payload += temperature; payload += ",";
-  payload += "\"humidity\":"; payload += humidity;
-  payload += "}";
-
-  // Send payload
-  char attributes[100];
-  payload.toCharArray(attributes, 100);
-  client.publish("/telemetry", attributes);
-}
-
-void InitWiFi() {
-  // attempt to connect to WiFi network
-  // set for STA mode
-  WiFi.mode(WIFI_STA);
-
-  WiFi.begin(wifiAP, wifiPassword);
-  configWiFiWithSmartConfig();
-}
-
-void configWiFiWithSmartConfig() {
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    smartBlink();
-    smartConfig();
-  }
-  closeBlink();
-}
-
-void reconnect() {
-  // Loop until we're reconnected
-  while (!client.connected()) {
-    if (WiFi.status() != WL_CONNECTED) {
-      configWiFiWithSmartConfig();
-    }
-    // Attempt to connect (clientId, username, password)
-    if (client.connect("ESP8266 Relay", "a937e135a6881193af39", "0d65b112c7b14f59b5ed69122958bb08")) {
-      client.subscribe("/request/+");
-      client.publish("/attributes", getPeriodic().c_str());
-      client.publish("/attributes", getLocalIP().c_str());
+    DynamicJsonDocument rsp(100);
+    if (methodName.equals("get_dht11_value")) {
+        rsp["temperature"] = temperature;
+        rsp["humidity"] = humidity;
     } else {
-      // Wait 5 seconds before retrying
-
-      threadDelay(5000);
-      smartBlink();
+        rsp["err"] = "Not Support";
     }
-  }
-  closeBlink();
-}
-
-void handleSetToken() {
-  boolean updated = false;
-  for (uint8_t i=0; i<server.args(); i++){
-    if (server.argName(i) == "token") {
-        strcpy(token, server.arg(i).c_str());
-        updated = true;
-        break;
-    };
-  }
-  if (updated) {
-    for (int i = 96; i < 126; ++i) {
-      EEPROM.write(i, token[i - 96]);
-    }
-    EEPROM.commit();
-    client.disconnect();
-  }
-  server.send(200, "text/plain", "OK");
-}
-
-void handleNotFound() {
-  server.send(404, "text/plain", "Not Found");
+    char rspData[100];
+    serializeJson(rsp, rspData);
+    client.publish(responseTopic.c_str(), rspData);
 }
